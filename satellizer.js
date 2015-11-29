@@ -1,5 +1,5 @@
 /**
- * Satellizer 0.13.1
+ * Satellizer 0.12.5
  * (c) 2015 Sahat Yalkabov
  * License: MIT
  */
@@ -18,7 +18,7 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
 
   angular.module('satellizer', [])
     .constant('SatellizerConfig', {
-      httpInterceptor: function() { return true; },
+      httpInterceptor: true,
       withCredentials: true,
       tokenRoot: null,
       cordova: false,
@@ -72,12 +72,11 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
         instagram: {
           name: 'instagram',
           url: '/auth/instagram',
-          authorizationEndpoint: 'https://api.instagram.com/oauth/authorize',
           redirectUri: window.location.origin,
           requiredUrlParams: ['scope'],
           scope: ['basic'],
           scopeDelimiter: '+',
-          type: '2.0'
+          authorizationEndpoint: 'https://api.instagram.com/oauth/authorize'
         },
         linkedin: {
           name: 'linkedin',
@@ -132,17 +131,6 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
           scopeDelimiter: ',',
           type: '2.0',
           popupOptions: { width: 559, height: 519 }
-        },
-        bitbucket: {
-          name: 'bitbucket',
-          url: '/auth/bitbucket',
-          authorizationEndpoint: 'https://bitbucket.org/site/oauth2/authorize',
-          redirectUri: window.location.origin + '/',
-          requiredUrlParams: ['scope'],
-          scope: ['email'],
-          scopeDelimiter: ',',
-          type: '2.0',
-          popupOptions: { width: 1028, height: 529 }
         }
       }
     })
@@ -150,15 +138,7 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
       Object.defineProperties(this, {
         httpInterceptor: {
           get: function() { return config.httpInterceptor; },
-          set: function(value) {
-            if (typeof value === 'function') {
-              config.httpInterceptor = value;
-            } else {
-              config.httpInterceptor = function() {
-                return value;
-              };
-            }
-          }
+          set: function(value) { config.httpInterceptor = value; }
         },
         baseUrl: {
           get: function() { return config.baseUrl; },
@@ -419,12 +399,7 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
 
           provider.open(config.providers[name], userData || {})
             .then(function(response) {
-              // This is for a scenario when someone wishes to opt out from
-              // Satellizer's magic by doing authorization code exchange and
-              // saving a token manually.
-              if (config.providers[name].url) {
-                shared.setToken(response, false);
-              }
+              shared.setToken(response, false);
               deferred.resolve(response);
             })
             .catch(function(error) {
@@ -434,6 +409,11 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
           return deferred.promise;
         };
 
+        /**
+         * @param {String} provider - OAuth provider name.
+         * @param {Object} opts - HTTP config object.
+         * @returns {Promise} - Returns a Promise that will be resolved when the request succeeds or fails.
+         */
         Oauth.unlink = function(provider, opts) {
             opts = opts || {};
             opts.url = opts.url ? opts.url : utils.joinUrl(config.baseUrl, config.unlinkUrl);
@@ -453,6 +433,11 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
       function($http, utils, shared, config) {
         var Local = {};
 
+        /**
+         * @param {Object} user - User information. (e.g. email and password)
+         * @param {Object} opts - HTTP config object.
+         * @returns {Promise} - Returns a Promise that will be resolved when the request succeeds or fails.
+         */
         Local.login = function(user, opts) {
           opts = opts || {};
           opts.url = opts.url ? opts.url : utils.joinUrl(config.baseUrl, config.loginUrl);
@@ -465,6 +450,11 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
           });
         };
 
+        /**
+         * @param {Object} user - User information. (e.g. email and password)
+         * @param {Object} opts - HTTP config object.
+         * @returns {Promise} - Returns a Promise that will be resolved when the request succeeds or fails.
+         */
         Local.signup = function(user, opts) {
           opts = opts || {};
           opts.url = opts.url ? opts.url : utils.joinUrl(config.baseUrl, config.signupUrl);
@@ -484,7 +474,8 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
       'SatellizerUtils',
       'SatellizerConfig',
       'SatellizerStorage',
-      function($q, $http, $window, popup, utils, config, storage) {
+      '$httpParamSerializer',
+      function($q, $http, $window, popup, utils, config, storage, $httpParamSerializer) {
         return function() {
           var Oauth2 = {};
 
@@ -521,11 +512,7 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
 
             return openPopup
               .then(function(oauthData) {
-                // When no server URL provided, return popup params as-is.
-                // This is for a scenario when someone wishes to opt out from
-                // Satellizer's magic by doing authorization code exchange and
-                // saving a token manually.
-                if (defaults.responseType === 'token' || !defaults.url) {
+                if (defaults.responseType === 'token') {
                   return oauthData;
                 }
 
@@ -562,7 +549,14 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
 
             var exchangeForTokenUrl = config.baseUrl ? utils.joinUrl(config.baseUrl, defaults.url) : defaults.url;
 
-            return $http.post(exchangeForTokenUrl, data, { withCredentials: config.withCredentials });
+            return $http({
+              method: 'POST', 
+              url: exchangeForTokenUrl,
+              data: $httpParamSerializer(data),
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+              }
+            });
           };
 
           Oauth2.buildQueryString = function() {
@@ -679,20 +673,12 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
         Popup.open = function(url, name, options) {
           Popup.url = url;
 
-          if (config.cordova) {
-            options.location = options.location || 'no';
-            options.toolbar = options.toolbar || 'yes';
-            options.width = $window.screen.width;
-            options.height = $window.screen.height;
-          }
-
           var stringifiedOptions = Popup.stringifyOptions(Popup.prepareOptions(options));
-          var UA = $window.navigator.userAgent;
-          var windowName = (config.cordova || UA.indexOf('CriOS') > -1) ? '_blank' : name;
+          var windowName = config.cordova ? '_blank' : name;
 
-          Popup.popupWindow = $window.open(url, windowName, stringifiedOptions);
+          Popup.popupWindow = window.open(url, windowName, stringifiedOptions);
 
-          $window.popup = Popup.popupWindow;
+          window.popup = Popup.popupWindow;
 
           if (Popup.popupWindow && Popup.popupWindow.focus) {
             Popup.popupWindow.focus();
@@ -751,15 +737,13 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
 
                 angular.extend(qs, hash);
 
-                if (qs.error) {
-                  deferred.reject(qs);
-                } else {
+                if (!qs.error) {
                   deferred.resolve(qs);
                 }
 
-                $interval.cancel(polling);
-
                 Popup.popupWindow.close();
+
+                $interval.cancel(polling);
               }
             } catch (error) {
               // Ignore DOMException: Blocked a frame with origin from accessing a cross-origin frame.
@@ -857,9 +841,9 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
       }
     })
     .factory('SatellizerStorage', ['$window', '$log', 'SatellizerConfig', function($window, $log, config) {
-
+      
       var store = {};
-
+      
       var isStorageAvailable = (function() {
         try {
           var supported = config.storageType in $window && $window[config.storageType] !== null;
@@ -891,7 +875,7 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
           return isStorageAvailable ? $window[config.storageType].removeItem(key): delete store[key];
         }
       };
-
+      
     }])
     .factory('SatellizerInterceptor', [
       '$q',
@@ -905,7 +889,7 @@ if (typeof module !== 'undefined' && typeof exports !== 'undefined' && module.ex
               return request;
             }
 
-            if (shared.isAuthenticated() && config.httpInterceptor(request)) {
+            if (shared.isAuthenticated() && config.httpInterceptor) {
               var tokenName = config.tokenPrefix ? config.tokenPrefix + '_' + config.tokenName : config.tokenName;
               var token = storage.get(tokenName);
 
